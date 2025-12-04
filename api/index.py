@@ -10,11 +10,24 @@ app = Flask(__name__)
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
-# Setup Gemini with the FLASH model (Fastest for bots)
+# Setup Gemini
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    # 1.5-flash is much faster than pro, preventing timeouts
-    model = genai.GenerativeModel('gemini-pro')
+    
+    # --- DIAGNOSTIC: PRINT AVAILABLE MODELS TO LOGS ---
+    try:
+        print("--- CHECKING AVAILABLE MODELS ---")
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(f"AVAILABLE MODEL: {m.name}")
+        print("--- END MODEL LIST ---")
+    except Exception as e:
+        print(f"Could not list models: {e}")
+    # --------------------------------------------------
+
+    # We will try the most specific versioned name which is safer
+    # If this fails, check your Vercel Logs for the list above!
+    model = genai.GenerativeModel('gemini-1.5-flash-001')
 
 if TELEGRAM_TOKEN:
     bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
@@ -22,37 +35,23 @@ if TELEGRAM_TOKEN:
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
-        # 1. Send typing action
-        bot.send_chat_action(message.chat.id, 'typing')
-
-        # 2. Check for empty keys
         if not GEMINI_KEY:
             bot.reply_to(message, "Error: GEMINI_API_KEY is missing.")
             return
 
-        # 3. Generate Content with a SAFETY TIMEOUT
-        # We assume if it takes > 9 seconds, Vercel will kill it anyway.
-        response = model.generate_content(message.text)
+        bot.send_chat_action(message.chat.id, 'typing')
         
-        # 4. Reply
-        if response.text:
-            bot.reply_to(message, response.text)
-        else:
-            bot.reply_to(message, "I received an empty response from Gemini.")
+        response = model.generate_content(message.text)
+        bot.reply_to(message, response.text)
 
     except Exception as e:
-        # If it crashes, tell us why
+        # Send the specific error to Telegram
         error_msg = f"⚠️ Error: {str(e)}"
-        print(f"CRASH: {traceback.format_exc()}") # Check Vercel logs for this
-        try:
-            bot.reply_to(message, error_msg)
-        except:
-            # If we can't even reply, just print
-            print("Could not send error message to Telegram.")
+        print(error_msg)
+        bot.reply_to(message, error_msg)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Standard webhook handler
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
@@ -63,5 +62,4 @@ def webhook():
 
 @app.route('/')
 def index():
-    return "Bot is alive."
-
+    return "Bot is running. Check Vercel Logs for model list."

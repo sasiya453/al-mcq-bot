@@ -2,33 +2,51 @@ from flask import Flask, request
 import telebot
 import google.generativeai as genai
 import os
+import traceback # Added to see detailed errors
 
-# Initialize Flask
 app = Flask(__name__)
 
-# Initialize Gemini
-# We use os.environ to get keys from Vercel settings later
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
+# CONFIGURATION
+# Make sure these match your Vercel Environment Variables exactly
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
-# Initialize Telegram Bot
-bot = telebot.TeleBot(os.environ["TELEGRAM_TOKEN"], threaded=False)
+# Setup Gemini
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    # Switched to 'gemini-pro' as it is more stable for text
+    model = genai.GenerativeModel('gemini-pro')
 
-# Handle incoming messages
+# Setup Bot
+if TELEGRAM_TOKEN:
+    bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    try:
-        # Send user text to Gemini
-        response = model.generate_content(message.text)
-        reply_text = response.text
-        
-        # Send Gemini's reply back to Telegram
-        bot.reply_to(message, reply_text)
-except Exception as e:
-        # This will send the actual technical error to your chat
-        bot.reply_to(message, f"Error details: {str(e)}")
+    # Check if keys are missing
+    if not GEMINI_KEY:
+        bot.reply_to(message, "Error: GEMINI_API_KEY is missing in Vercel settings.")
+        return
+    if not TELEGRAM_TOKEN:
+        bot.reply_to(message, "Error: TELEGRAM_TOKEN is missing in Vercel settings.")
+        return
 
-# The Webhook Route (This is what Telegram calls)
+    try:
+        # Send "Typing..." action so you know it received the message
+        bot.send_chat_action(message.chat.id, 'typing')
+        
+        # Generate response
+        response = model.generate_content(message.text)
+        
+        # Reply
+        bot.reply_to(message, response.text)
+        
+    except Exception as e:
+        # detailed error handling
+        error_msg = f"⚠️ Error: {str(e)}"
+        print(error_msg) # Prints to Vercel logs
+        bot.reply_to(message, error_msg) # Sends to Telegram
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -39,8 +57,6 @@ def webhook():
     else:
         return 'Error', 403
 
-# Home Route (To check if bot is alive)
 @app.route('/')
 def index():
-    return "Bot is running!"
-
+    return "Bot is running! Keys loaded: " + str(bool(GEMINI_KEY))

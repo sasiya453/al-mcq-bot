@@ -14,7 +14,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
     # 1.5-flash is much faster than pro, preventing timeouts
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
 
 if TELEGRAM_TOKEN:
     bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
@@ -64,3 +64,4 @@ def webhook():
 @app.route('/')
 def index():
     return "Bot is alive."
+

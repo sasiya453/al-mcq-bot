@@ -826,18 +826,19 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
+  // From MAIN MENU image → always open a new text menu
   if (data === 'menu_practice') {
-    await handlePracticeMenu(chatId, userId, messageId);
+    await handlePracticeMenu(chatId, userId, null);  // do NOT pass messageId
     return;
   }
 
   if (data === 'menu_weekly') {
-    await handleWeeklyMenu(chatId, messageId);
+    await handleWeeklyMenu(chatId, null);            // new message
     return;
   }
 
   if (data === 'menu_about') {
-    await handleAbout(chatId, messageId);
+    await handleAbout(chatId, null);                 // new message
     return;
   }
 

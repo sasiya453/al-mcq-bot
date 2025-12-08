@@ -28,7 +28,7 @@ async function callTelegram(method, params) {
   return data;
 }
 
-// Send a new menu or edit the existing one (single-message menus)
+// Send a new menu or edit the existing one (single-message menus for TEXT messages)
 async function sendOrEditMenu({ chatId, messageId, text, keyboard }) {
   const payload = {
     chat_id: chatId,
@@ -174,7 +174,7 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
     data: { student_id: studentRow?.id || null },
   });
 
-  // delete previous menu message if we have its id
+  // delete previous menu message if we have its id (usually a TEXT menu)
   if (messageId) {
     try {
       await callTelegram('deleteMessage', {
@@ -182,7 +182,6 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
         message_id: messageId,
       });
     } catch (e) {
-      // ignore failures (e.g. message already deleted)
       console.error('delete main menu message error', e);
     }
   }
@@ -190,7 +189,7 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
   // always send main menu as a photo with caption + buttons
   await callTelegram('sendPhoto', {
     chat_id: chatId,
-    photo: 'https://t.me/MyBotDatabase/3', // your main menu image
+    photo: 'https://t.me/MyBotDatabase/3',
     caption:
       `👋 Hi *${name}*!\n` +
       'Welcome to the A/L MCQ practice bot.\n\n' +
@@ -205,6 +204,7 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
     },
   });
 }
+
 // ---- PRACTICE FLOW ----
 async function handlePracticeMenu(chatId, userId, messageId = null) {
   const session = await getSession(userId);
@@ -797,6 +797,9 @@ async function handleCallback(callbackQuery) {
   const userId = callbackQuery.from.id;
   const messageId = callbackQuery.message.message_id;
 
+  // true if this callback came from the main-menu photo message
+  const isPhotoMessage = !!callbackQuery.message.photo;
+
   await callTelegram('answerCallbackQuery', {
     callback_query_id: callbackQuery.id,
   });
@@ -826,19 +829,21 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
-  // From MAIN MENU image → always open a new text menu
+  // MAIN MENU buttons:
+  // - from photo → create a new text menu (messageId = null)
+  // - from existing text menu (e.g. back buttons) → edit that text message
   if (data === 'menu_practice') {
-    await handlePracticeMenu(chatId, userId, null);  // do NOT pass messageId
+    await handlePracticeMenu(chatId, userId, isPhotoMessage ? null : messageId);
     return;
   }
 
   if (data === 'menu_weekly') {
-    await handleWeeklyMenu(chatId, null);            // new message
+    await handleWeeklyMenu(chatId, isPhotoMessage ? null : messageId);
     return;
   }
 
   if (data === 'menu_about') {
-    await handleAbout(chatId, null);                 // new message
+    await handleAbout(chatId, isPhotoMessage ? null : messageId);
     return;
   }
 

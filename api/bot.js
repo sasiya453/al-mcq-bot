@@ -117,11 +117,14 @@ async function handleStart(msg) {
   // 1) Force-subscribe to channel
   const member = await isMemberOfChannel(userId);
   if (!member) {
-    await callTelegram('sendMessage', {
+    // send image + caption with buttons
+    await callTelegram('sendPhoto', {
       chat_id: chatId,
-      text:
+      photo: 'https://t.me/MyBotDatabase/2',
+      caption:
         '📢 Please join our channel before using the A/L MCQ bot.\n\n' +
         'After joining, tap "Done & Start".',
+      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [{ text: '📲 Join Channel', url: CHANNEL_URL }],
@@ -169,6 +172,14 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
     state: 'IDLE',
     data: { student_id: studentRow?.id || null },
   });
+
+  // Show image only first time (when there is no messageId to edit)
+  if (!messageId) {
+    await callTelegram('sendPhoto', {
+      chat_id: chatId,
+      photo: 'https://t.me/MyBotDatabase/3',
+    });
+  }
 
   await sendOrEditMenu({
     chatId,
@@ -407,6 +418,9 @@ async function startPracticeQuiz(chatId, userId, requestedCount) {
   };
   await saveSession(session);
 
+  // 👀 animation emoji before first question
+  await callTelegram('sendMessage', { chat_id: chatId, text: '👀' });
+
   await sendCurrentQuestion(chatId, session);
 }
 
@@ -488,7 +502,7 @@ async function handleQuizAnswer(callbackQuery, chosenIndex) {
 
   const totalQuestions = questions.length;
 
-  // Next or finish? (no "Next" button – auto send next question)
+  // Next or finish? (auto-advance, no Next button)
   if (currentIndex + 1 >= totalQuestions) {
     session.state = 'QUIZ_FINISHED';
     await saveSession(session);
@@ -560,6 +574,11 @@ async function sendPracticeResult(chatId, session, opts = {}) {
       inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'goto_main_menu' }]],
     },
   });
+
+  // Full score emoji 🏆
+  if (score === qcount && qcount > 0) {
+    await callTelegram('sendMessage', { chat_id: chatId, text: '🏆' });
+  }
 
   try {
     const studentRow = await isRegistered(session.telegram_id);
@@ -723,6 +742,9 @@ async function startWeeklyQuiz(chatId, userId, stream) {
     startedAt: Date.now(),
   };
   await saveSession(session);
+
+  // 👀 emoji before first weekly question
+  await callTelegram('sendMessage', { chat_id: chatId, text: '👀' });
 
   await sendCurrentQuestion(chatId, session);
 }

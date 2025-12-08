@@ -196,7 +196,7 @@ async function handlePracticeMenu(chatId, userId, messageId = null) {
   await sendOrEditMenu({
     chatId,
     messageId,
-    text: '📚 *Practice MCQs*\nSelect a subject:',
+    text: '📚 *Practice MCQs*\nSelect a subject:ㅤㅤㅤㅤㅤㅤㅤㅤ',
     keyboard: [
       [
         { text: 'Physics', callback_data: 'practice_subject_1' },

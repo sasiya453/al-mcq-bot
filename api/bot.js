@@ -109,6 +109,27 @@ async function saveSession(session) {
   if (error) console.error('saveSession error', error);
 }
 
+// ---- REGISTRATION PROMPT (video + caption + buttons) ----
+async function sendRegistrationPrompt(chatId) {
+  await callTelegram('sendVideo', {
+    chat_id: chatId,
+    video: 'https://t.me/MyBotDatabase/4',
+    caption:
+      '👋 Welcome to A/L MCQ Bot.\n\n' +
+      'You are *not registered* yet. Please sign up using the Web App.\n\n' +
+      '1️⃣ Tap *Register / Login*\n' +
+      '2️⃣ Complete the form\n' +
+      '3️⃣ Return here and tap *I have registered*.',
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📝 Register / Login', web_app: { url: WEBAPP_URL } }],
+        [{ text: '✅ I have registered', callback_data: 'check_registered' }],
+      ],
+    },
+  });
+}
+
 // ---- MAIN GATEKEEPER FLOW ----
 async function handleStart(msg) {
   const chatId = msg.chat.id;
@@ -137,25 +158,7 @@ async function handleStart(msg) {
   // 2) Registration check
   const studentRow = await isRegistered(userId);
   if (!studentRow) {
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
-      text:
-        '👋 Welcome to A/L MCQ Bot.\n\n' +
-        'You are *not registered* yet. Please sign up using the Web App.',
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '📝 Register / Login',
-              web_app: { url: WEBAPP_URL },
-            },
-          ],
-          [{ text: '❓ Help', url: HELP_URL }],
-          [{ text: '✅ I have registered', callback_data: 'check_registered' }],
-        ],
-      },
-    });
+    await sendRegistrationPrompt(chatId);
     return;
   }
 
@@ -802,19 +805,24 @@ async function handleCallback(callbackQuery) {
     callback_query_id: callbackQuery.id,
   });
 
+  // Gatekeeper "Done & Start" – delete message then rerun /start
   if (data === 'done_join') {
+    try {
+      await callTelegram('deleteMessage', { chat_id: chatId, message_id: messageId });
+    } catch (e) {}
     await handleStart({ chat: { id: chatId }, from: { id: userId } });
     return;
   }
 
+  // Registration check – delete video, then either show menu or send again
   if (data === 'check_registered') {
+    try {
+      await callTelegram('deleteMessage', { chat_id: chatId, message_id: messageId });
+    } catch (e) {}
+
     const studentRow = await isRegistered(userId);
     if (!studentRow) {
-      await callTelegram('sendMessage', {
-        chat_id: chatId,
-        text:
-          'Still not registered.\n\nPlease open the Web App, finish registration, then tap "I have registered" again.',
-      });
+      await sendRegistrationPrompt(chatId);
       return;
     }
     await showMainMenu(chatId, userId, studentRow, null);
@@ -824,12 +832,12 @@ async function handleCallback(callbackQuery) {
   if (data === 'goto_main_menu') {
     const studentRow = await isRegistered(userId);
     const session = await getSession(userId);
-    const menuId = session.data.menu_message_id || messageId;
+    const menuId = session.data.menu_message_id || null;
     await showMainMenu(chatId, userId, studentRow || {}, menuId);
     return;
   }
 
-  // main menu buttons: delete photo (if from photo), then open/edit text menu
+  // main menu buttons: delete photo, then open/edit text menu
   if (data === 'menu_practice') {
     if (isPhoto) {
       try {

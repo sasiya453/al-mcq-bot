@@ -29,6 +29,25 @@ async function callTelegram(method, params) {
   return data;
 }
 
+// Send a new menu or edit the existing one (single-message menus)
+async function sendOrEditMenu({ chatId, messageId, text, keyboard }) {
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard },
+  };
+
+  if (messageId) {
+    return callTelegram('editMessageText', {
+      ...payload,
+      message_id: messageId,
+    });
+  }
+
+  return callTelegram('sendMessage', payload);
+}
+
 async function isMemberOfChannel(userId) {
   if (!CHANNEL_USERNAME) return true; // skip check if not set
 
@@ -59,7 +78,7 @@ async function isMemberOfChannel(userId) {
 async function isRegistered(telegramId) {
   const { data, error } = await supabase
     .from('students')
-    .select('id, stream, grade')
+    .select('id, stream, grade, full_name')
     .eq('telegram_id', telegramId)
     .maybeSingle();
   if (error) {
@@ -139,11 +158,11 @@ async function handleStart(msg) {
     return;
   }
 
-  // 3) Registered → Main menu
-  await showMainMenu(chatId, userId, studentRow);
+  // 3) Registered → Main menu (new message first time)
+  await showMainMenu(chatId, userId, studentRow, null);
 }
 
-async function showMainMenu(chatId, userId, studentRow) {
+async function showMainMenu(chatId, userId, studentRow, messageId = null) {
   const name = studentRow?.full_name || 'Student';
 
   await saveSession({
@@ -152,47 +171,43 @@ async function showMainMenu(chatId, userId, studentRow) {
     data: { student_id: studentRow?.id || null },
   });
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text:
       `👋 Hi *${name}*!\n` +
       'Welcome to the A/L MCQ practice bot.\n\n' +
       'Choose an option:',
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📚 Practice MCQs', callback_data: 'menu_practice' }],
-        [{ text: '🏆 Weekly Paper', callback_data: 'menu_weekly' }],
-        [{ text: 'ℹ️ About Us', callback_data: 'menu_about' }],
-      ],
-    },
+    keyboard: [
+      [{ text: '📚 Practice MCQs', callback_data: 'menu_practice' }],
+      [{ text: '🏆 Weekly Paper', callback_data: 'menu_weekly' }],
+      [{ text: 'ℹ️ About Us', callback_data: 'menu_about' }],
+    ],
   });
 }
 
 // ---- PRACTICE FLOW ----
-async function handlePracticeMenu(chatId, userId) {
+async function handlePracticeMenu(chatId, userId, messageId = null) {
   const session = await getSession(userId);
   session.state = 'CHOOSING_SUBJECT';
   session.data = session.data || {};
   await saveSession(session);
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text: '📚 *Practice MCQs*\n\nSelect a subject:',
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: 'Physics', callback_data: 'practice_subject_1' },
-          { text: 'Chemistry', callback_data: 'practice_subject_2' },
-        ],
-        [
-          { text: 'Bio', callback_data: 'practice_subject_3' },
-          { text: 'Maths', callback_data: 'practice_subject_4' },
-        ],
-        [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
+    keyboard: [
+      [
+        { text: 'Physics', callback_data: 'practice_subject_1' },
+        { text: 'Chemistry', callback_data: 'practice_subject_2' },
       ],
-    },
+      [
+        { text: 'Bio', callback_data: 'practice_subject_3' },
+        { text: 'Maths', callback_data: 'practice_subject_4' },
+      ],
+      [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
+    ],
   });
 }
 
@@ -200,31 +215,29 @@ function subjectLabel(id) {
   return { 1: 'Physics', 2: 'Chemistry', 3: 'Bio', 4: 'Maths' }[id] || 'Subject';
 }
 
-async function handleSubjectChosen(chatId, userId, subjectId) {
+async function handleSubjectChosen(chatId, userId, subjectId, messageId = null) {
   const session = await getSession(userId);
   session.state = 'CHOOSING_TYPE';
   session.data = { ...session.data, subjectId, practiceType: null, lesson: null, term: null };
   await saveSession(session);
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text:
       `You selected *${subjectLabel(subjectId)}*.\n\n` +
       'What do you want to practice?',
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Lesson target MCQs', callback_data: 'practice_type_lesson' }],
-        [{ text: 'A/L exam target MCQs', callback_data: 'practice_type_exam' }],
-        [{ text: 'Term test target MCQs', callback_data: 'practice_type_term' }],
-        [{ text: '⬅️ Back to subjects', callback_data: 'menu_practice' }],
-      ],
-    },
+    keyboard: [
+      [{ text: 'Lesson target MCQs', callback_data: 'practice_type_lesson' }],
+      [{ text: 'A/L exam target MCQs', callback_data: 'practice_type_exam' }],
+      [{ text: 'Term test target MCQs', callback_data: 'practice_type_term' }],
+      [{ text: '⬅️ Back to subjects', callback_data: 'menu_practice' }],
+    ],
   });
 }
 
 // ---- LESSON / TERM LISTS ----
-async function sendLessonChooser(chatId, session) {
+async function sendLessonChooser(chatId, session, messageId = null) {
   const subjectId = session.data.subjectId;
 
   const { data, error } = await supabase
@@ -235,9 +248,11 @@ async function sendLessonChooser(chatId, session) {
     .order('lesson', { ascending: true });
 
   if (error || !data || data.length === 0) {
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
+    await sendOrEditMenu({
+      chatId,
+      messageId,
       text: 'No lessons found for this subject.',
+      keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]],
     });
     return;
   }
@@ -261,14 +276,15 @@ async function sendLessonChooser(chatId, session) {
   }
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text: 'Select a lesson:',
-    reply_markup: { inline_keyboard: rows },
+    keyboard: rows,
   });
 }
 
-async function sendTermChooser(chatId, session) {
+async function sendTermChooser(chatId, session, messageId = null) {
   const subjectId = session.data.subjectId;
 
   const { data, error } = await supabase
@@ -278,9 +294,11 @@ async function sendTermChooser(chatId, session) {
     .not('term', 'is', null);
 
   if (error || !data || data.length === 0) {
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
+    await sendOrEditMenu({
+      chatId,
+      messageId,
       text: 'No terms found for this subject.',
+      keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]],
     });
     return;
   }
@@ -299,34 +317,34 @@ async function sendTermChooser(chatId, session) {
   });
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text: 'Select a term:',
-    reply_markup: { inline_keyboard: rows },
+    keyboard: rows,
   });
 }
 
-async function sendQuestionCountChooser(chatId, session) {
+async function sendQuestionCountChooser(chatId, session, messageId = null) {
   session.state = 'CHOOSING_QCOUNT';
   await saveSession(session);
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text: 'How many questions do you want?',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '10', callback_data: 'practice_qcount_10' },
-          { text: '20', callback_data: 'practice_qcount_20' },
-          { text: '30', callback_data: 'practice_qcount_30' },
-        ],
-        [
-          { text: '40', callback_data: 'practice_qcount_40' },
-          { text: '50', callback_data: 'practice_qcount_50' },
-        ],
-        [{ text: '⬅️ Back', callback_data: 'menu_practice' }],
+    keyboard: [
+      [
+        { text: '10', callback_data: 'practice_qcount_10' },
+        { text: '20', callback_data: 'practice_qcount_20' },
+        { text: '30', callback_data: 'practice_qcount_30' },
       ],
-    },
+      [
+        { text: '40', callback_data: 'practice_qcount_40' },
+        { text: '50', callback_data: 'practice_qcount_50' },
+      ],
+      [{ text: '⬅️ Back', callback_data: 'menu_practice' }],
+    ],
   });
 }
 
@@ -541,59 +559,56 @@ async function sendPracticeResult(chatId, session, opts = {}) {
 }
 
 // ---- WEEKLY PAPER (Top 10 opens WebApp) ----
-async function handleWeeklyMenu(chatId) {
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+async function handleWeeklyMenu(chatId, messageId = null) {
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text: '🏆 *Weekly Paper*\n\nSelect your stream:',
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: 'Bio Stream', callback_data: 'weekly_stream_bio' },
-          { text: 'Maths Stream', callback_data: 'weekly_stream_maths' },
-        ],
-        [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
+    keyboard: [
+      [
+        { text: 'Bio Stream', callback_data: 'weekly_stream_bio' },
+        { text: 'Maths Stream', callback_data: 'weekly_stream_maths' },
       ],
-    },
+      [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
+    ],
   });
 }
 
-async function handleWeeklyStream(chatId, stream) {
+async function handleWeeklyStream(chatId, stream, messageId = null) {
   const streamLabel = stream === 'bio' ? 'Bio Stream' : 'Maths Stream';
 
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text:
       `🏆 *Weekly Paper – ${streamLabel}*\n\n` +
       'You can attend the paper via the bot (coming soon)\n' +
       'and view the *Top 10* leaderboard in the Web App.',
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '✏️ Attend Paper (soon)', callback_data: 'noop' }],
-        [
-          {
-            text: '🏅 View Top 10',
-            web_app: { url: `${TOP10_WEBAPP_URL}?stream=${stream}` },
-          },
-        ],
-        [{ text: '⬅️ Back', callback_data: 'menu_weekly' }],
+    keyboard: [
+      [{ text: '✏️ Attend Paper (soon)', callback_data: 'noop' }],
+      [
+        {
+          text: '🏅 View Top 10',
+          web_app: { url: `${TOP10_WEBAPP_URL}?stream=${stream}` },
+        },
       ],
-    },
+      [{ text: '⬅️ Back', callback_data: 'menu_weekly' }],
+    ],
   });
 }
 
 // ---- ABOUT ----
-async function handleAbout(chatId) {
-  await callTelegram('sendMessage', {
-    chat_id: chatId,
+async function handleAbout(chatId, messageId = null) {
+  await sendOrEditMenu({
+    chatId,
+    messageId,
     text:
       'ℹ️ *About Us*\n\n' +
       'This bot helps A/L students practice MCQs in Physics, Chemistry, Bio and Maths.\n' +
       '• Lesson, term and exam‑target practice\n' +
       '• Weekly mixed papers with rankings\n' +
       '• Detailed analytics and PDFs in the Web App.',
-    parse_mode: 'Markdown',
+    keyboard: [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]],
   });
 }
 
@@ -603,14 +618,10 @@ async function handleMessage(message) {
   const userId = message.from.id;
   const text = (message.text || '').trim();
 
-  // Match /start, /start@BotName, /start anything
   if (text.toLowerCase().startsWith('/start')) {
     await handleStart(message);
     return;
   }
-
-  // Optionally ignore non-private chats
-  // if (message.chat.type !== 'private') return;
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
@@ -623,6 +634,7 @@ async function handleCallback(callbackQuery) {
   const { data } = callbackQuery;
   const chatId = callbackQuery.message.chat.id;
   const userId = callbackQuery.from.id;
+  const messageId = callbackQuery.message.message_id;
 
   // Acknowledge callback to remove "loading" state
   await callTelegram('answerCallbackQuery', {
@@ -644,38 +656,42 @@ async function handleCallback(callbackQuery) {
       });
       return;
     }
-    await showMainMenu(chatId, userId, studentRow);
+    await showMainMenu(chatId, userId, studentRow, messageId);
     return;
   }
 
   if (data === 'goto_main_menu') {
     const studentRow = await isRegistered(userId);
-    await showMainMenu(chatId, userId, studentRow || {});
+    await showMainMenu(chatId, userId, studentRow || {}, messageId);
     return;
   }
 
   if (data === 'menu_practice') {
-    await handlePracticeMenu(chatId, userId);
+    await handlePracticeMenu(chatId, userId, messageId);
     return;
   }
 
   if (data === 'menu_weekly') {
-    await handleWeeklyMenu(chatId);
+    await handleWeeklyMenu(chatId, messageId);
     return;
   }
 
   if (data === 'menu_about') {
-    await handleAbout(chatId);
+    await handleAbout(chatId, messageId);
     return;
   }
 
   if (data.startsWith('practice_subject_')) {
     const id = parseInt(data.split('_').pop(), 10);
-    await handleSubjectChosen(chatId, userId, id);
+    await handleSubjectChosen(chatId, userId, id, messageId);
     return;
   }
 
-  if (data === 'practice_type_lesson' || data === 'practice_type_term' || data === 'practice_type_exam') {
+  if (
+    data === 'practice_type_lesson' ||
+    data === 'practice_type_term' ||
+    data === 'practice_type_exam'
+  ) {
     const session = await getSession(userId);
     session.data.practiceType =
       data === 'practice_type_lesson'
@@ -686,11 +702,11 @@ async function handleCallback(callbackQuery) {
     await saveSession(session);
 
     if (session.data.practiceType === 'lesson') {
-      await sendLessonChooser(chatId, session);
+      await sendLessonChooser(chatId, session, messageId);
     } else if (session.data.practiceType === 'term') {
-      await sendTermChooser(chatId, session);
+      await sendTermChooser(chatId, session, messageId);
     } else {
-      await sendQuestionCountChooser(chatId, session);
+      await sendQuestionCountChooser(chatId, session, messageId);
     }
     return;
   }
@@ -700,7 +716,7 @@ async function handleCallback(callbackQuery) {
     const session = await getSession(userId);
     session.data.lesson = lesson;
     await saveSession(session);
-    await sendQuestionCountChooser(chatId, session);
+    await sendQuestionCountChooser(chatId, session, messageId);
     return;
   }
 
@@ -710,7 +726,7 @@ async function handleCallback(callbackQuery) {
     const session = await getSession(userId);
     session.data.term = term;
     await saveSession(session);
-    await sendQuestionCountChooser(chatId, session);
+    await sendQuestionCountChooser(chatId, session, messageId);
     return;
   }
 
@@ -737,15 +753,14 @@ async function handleCallback(callbackQuery) {
   }
 
   if (data === 'weekly_stream_bio') {
-    await handleWeeklyStream(chatId, 'bio');
+    await handleWeeklyStream(chatId, 'bio', messageId);
     return;
   }
   if (data === 'weekly_stream_maths') {
-    await handleWeeklyStream(chatId, 'maths');
+    await handleWeeklyStream(chatId, 'maths', messageId);
     return;
   }
 
-  // No-op
   if (data === 'noop') return;
 }
 
@@ -768,7 +783,6 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('Update handling error', err);
-    // Always respond 200 to Telegram
   }
 
   return res.status(200).json({ ok: true });

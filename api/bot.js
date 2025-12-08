@@ -567,20 +567,30 @@ async function sendPracticeResult(chatId, session, opts = {}) {
   const gaveUp = opts.gaveUp;
   const isWeekly = mode === 'weekly';
 
-  const text =
+  // Base analytics text (without the "Tap Main Menu..." line)
+  const baseText =
     `📊 *${isWeekly ? 'Weekly paper' : 'Practice session'} finished*\n\n` +
     `Score: *${score}/${qcount}*\n` +
-    (gaveUp ? '_You ended the quiz early._\n\n' : '\n') +
-    'Tap *Main Menu* to continue.';
+    (gaveUp ? '_You ended the quiz early._\n\n' : '\n');
 
-  await callTelegram('sendMessage', {
+  // What we actually send (includes the hint)
+  const fullText = baseText + 'Tap *Main Menu* to continue.';
+
+  // Send analytics message with Main Menu button
+  const res = await callTelegram('sendMessage', {
     chat_id: chatId,
-    text,
+    text: fullText,
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'goto_main_menu' }]],
     },
   });
+
+  // Save this result message id + base text in session so we can edit it later
+  const resultMsgId = res?.result?.message_id || null;
+  session.data.last_result_base = baseText;
+  session.data.last_result_message_id = resultMsgId;
+  await saveSession(session);
 
   // Full score emoji 🏆
   if (score === qcount && qcount > 0) {
@@ -829,13 +839,45 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
-  if (data === 'goto_main_menu') {
-    const studentRow = await isRegistered(userId);
-    const session = await getSession(userId);
-    const menuId = session.data.menu_message_id || null;
-    await showMainMenu(chatId, userId, studentRow || {}, menuId);
-    return;
+if (data === 'goto_main_menu') {
+  const session = await getSession(userId);
+  const studentRow = await isRegistered(userId);
+
+  // Id of the analytics/result message (fallback to current message)
+  const resultMsgId =
+    session.data.last_result_message_id || callbackQuery.message.message_id;
+  const baseText = session.data.last_result_base;
+
+  try {
+    if (baseText) {
+      // Edit message: remove Main Menu line + remove buttons
+      await callTelegram('editMessageText', {
+        chat_id: chatId,
+        message_id: resultMsgId,
+        text: baseText,             // base text only, no "Tap Main Menu..."
+        parse_mode: 'Markdown',
+      });
+
+      // clear stored result info
+      session.data.last_result_base = null;
+      session.data.last_result_message_id = null;
+      await saveSession(session);
+    } else {
+      // Fallback: just remove the keyboard
+      await callTelegram('editMessageReplyMarkup', {
+        chat_id: chatId,
+        message_id: resultMsgId,
+        reply_markup: { inline_keyboard: [] },
+      });
+    }
+  } catch (e) {
+    console.error('edit result message on main menu error', e);
   }
+
+  // Now show new main menu (photo)
+  await showMainMenu(chatId, userId, studentRow || {}, null);
+  return;
+}
 
   // main menu buttons: delete photo, then open/edit text menu
   if (data === 'menu_practice') {

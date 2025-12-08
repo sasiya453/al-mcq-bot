@@ -488,7 +488,7 @@ async function handleQuizAnswer(callbackQuery, chosenIndex) {
 
   const totalQuestions = questions.length;
 
-  // Next or finish?
+  // Next or finish? (no "Next" button – auto send next question)
   if (currentIndex + 1 >= totalQuestions) {
     session.state = 'QUIZ_FINISHED';
     await saveSession(session);
@@ -496,32 +496,44 @@ async function handleQuizAnswer(callbackQuery, chosenIndex) {
   } else {
     data.currentIndex += 1;
     await saveSession(session);
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
-      text: 'Next question ➡️',
-      reply_markup: {
-        inline_keyboard: [[{ text: '➡️ Next', callback_data: 'quiz_next' }]],
-      },
-    });
+    await sendCurrentQuestion(chatId, session);
   }
 }
 
-async function handleQuizNext(chatId, userId, nextMsgId) {
-  // delete the "Next" message
-  if (nextMsgId) {
-    await callTelegram('deleteMessage', {
-      chat_id: chatId,
-      message_id: nextMsgId,
-    });
-  }
-  const session = await getSession(userId);
-  if (session.state !== 'QUIZ_ACTIVE') return;
-  await sendCurrentQuestion(chatId, session);
-}
+// ---- GIVE UP HANDLER (shows explanation, then finishes) ----
+async function handleQuizGiveUp(callbackQuery) {
+  const userId = callbackQuery.from.id;
+  const chatId = callbackQuery.message.chat.id;
+  const messageId = callbackQuery.message.message_id;
 
-async function handleQuizGiveUp(chatId, userId) {
   let session = await getSession(userId);
   if (session.state !== 'QUIZ_ACTIVE') return;
+
+  const data = session.data;
+  const { questions, currentIndex } = data;
+  const q = questions[currentIndex];
+
+  const correct = q.correct_answer;
+
+  data.answers.push({
+    question_id: q.id,
+    chosen_answer: null,
+    correct_answer: correct,
+    is_correct: false,
+  });
+
+  const resultText =
+    `*Q${currentIndex + 1}:* ${q.question}\n\n` +
+    `✅ Correct answer: *${answerLabel(correct)}*\n` +
+    `🚩 You gave up this question.\n\n` +
+    (q.explanation ? `*Explanation:* ${q.explanation}` : '');
+
+  await callTelegram('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: resultText,
+    parse_mode: 'Markdown',
+  });
 
   session.state = 'QUIZ_FINISHED';
   await saveSession(session);
@@ -865,13 +877,8 @@ async function handleCallback(callbackQuery) {
     return;
   }
 
-  if (data === 'quiz_next') {
-    await handleQuizNext(chatId, userId, messageId);
-    return;
-  }
-
   if (data === 'quiz_giveup') {
-    await handleQuizGiveUp(chatId, userId);
+    await handleQuizGiveUp(callbackQuery);
     return;
   }
 

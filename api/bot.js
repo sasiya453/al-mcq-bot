@@ -28,7 +28,7 @@ async function callTelegram(method, params) {
   return data;
 }
 
-// Send a new menu or edit the existing one (single-message menus for TEXT messages)
+// Send a new menu or edit the existing one (for TEXT messages)
 async function sendOrEditMenu({ chatId, messageId, text, keyboard }) {
   const payload = {
     chat_id: chatId,
@@ -48,7 +48,7 @@ async function sendOrEditMenu({ chatId, messageId, text, keyboard }) {
 }
 
 async function isMemberOfChannel(userId) {
-  if (!CHANNEL_USERNAME) return true; // skip check if not set
+  if (!CHANNEL_USERNAME) return true;
 
   try {
     const res = await fetch(
@@ -117,7 +117,6 @@ async function handleStart(msg) {
   // 1) Force-subscribe to channel
   const member = await isMemberOfChannel(userId);
   if (!member) {
-    // send image + caption with buttons
     await callTelegram('sendPhoto', {
       chat_id: chatId,
       photo: 'https://t.me/MyBotDatabase/2',
@@ -164,29 +163,29 @@ async function handleStart(msg) {
   await showMainMenu(chatId, userId, studentRow, null);
 }
 
-async function showMainMenu(chatId, userId, studentRow, messageId = null) {
+async function showMainMenu(chatId, userId, studentRow, menuMessageId = null) {
   const name = studentRow?.full_name || 'Student';
 
-  // reset session state
+  // Reset session — remove text-menu tracking too
   await saveSession({
     telegram_id: userId,
     state: 'IDLE',
-    data: { student_id: studentRow?.id || null },
+    data: { student_id: studentRow?.id || null, menu_message_id: null },
   });
 
-  // delete previous menu message if we have its id (usually a TEXT menu)
-  if (messageId) {
+  // Delete current text menu if we know it
+  if (menuMessageId) {
     try {
       await callTelegram('deleteMessage', {
         chat_id: chatId,
-        message_id: messageId,
+        message_id: menuMessageId,
       });
     } catch (e) {
-      console.error('delete main menu message error', e);
+      console.error('delete menu message error', e);
     }
   }
 
-  // always send main menu as a photo with caption + buttons
+  // Always send main menu as a photo with caption + buttons
   await callTelegram('sendPhoto', {
     chat_id: chatId,
     photo: 'https://t.me/MyBotDatabase/3',
@@ -205,18 +204,32 @@ async function showMainMenu(chatId, userId, studentRow, messageId = null) {
   });
 }
 
+// --- helper to send/edit unified text menu & store its message_id ---
+async function sendMenuAndStore(session, chatId, text, keyboard) {
+  const existingId = session.data.menu_message_id || null;
+
+  const res = await sendOrEditMenu({
+    chatId,
+    messageId: existingId,
+    text,
+    keyboard,
+  });
+
+  const newId = res?.result?.message_id ?? existingId;
+  session.data.menu_message_id = newId;
+  await saveSession(session);
+  return newId;
+}
+
 // ---- PRACTICE FLOW ----
-async function handlePracticeMenu(chatId, userId, messageId = null) {
+async function handlePracticeMenu(chatId, userId) {
   const session = await getSession(userId);
   session.state = 'CHOOSING_SUBJECT';
   session.data = session.data || {};
-  await saveSession(session);
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text: '📚 *Practice MCQs*\nSelect a subject:',
-    keyboard: [
+  await sendMenuAndStore(session, chatId,
+    '📚 *Practice MCQs*\nSelect a subject:',
+    [
       [
         { text: 'Physics', callback_data: 'practice_subject_1' },
         { text: 'Chemistry', callback_data: 'practice_subject_2' },
@@ -226,37 +239,30 @@ async function handlePracticeMenu(chatId, userId, messageId = null) {
         { text: 'Maths', callback_data: 'practice_subject_4' },
       ],
       [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
-    ],
-  });
+    ]);
 }
 
 function subjectLabel(id) {
   return { 1: 'Physics', 2: 'Chemistry', 3: 'Bio', 4: 'Maths' }[id] || 'Subject';
 }
 
-async function handleSubjectChosen(chatId, userId, subjectId, messageId = null) {
+async function handleSubjectChosen(chatId, userId, subjectId) {
   const session = await getSession(userId);
   session.state = 'CHOOSING_TYPE';
   session.data = { ...session.data, subjectId, practiceType: null, lesson: null, term: null };
-  await saveSession(session);
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text:
-      `*${subjectLabel(subjectId)}* selected.\n` +
-      'What do you want to practice?',
-    keyboard: [
+  await sendMenuAndStore(session, chatId,
+    `*${subjectLabel(subjectId)}* selected.\nWhat do you want to practice?`,
+    [
       [{ text: 'Lesson target MCQs', callback_data: 'practice_type_lesson' }],
       [{ text: 'A/L exam target MCQs', callback_data: 'practice_type_exam' }],
       [{ text: 'Term test target MCQs', callback_data: 'practice_type_term' }],
       [{ text: '⬅️ Back to subjects', callback_data: 'menu_practice' }],
-    ],
-  });
+    ]);
 }
 
 // ---- LESSON / TERM LISTS ----
-async function sendLessonChooser(chatId, session, messageId = null) {
+async function sendLessonChooser(chatId, session) {
   const subjectId = session.data.subjectId;
 
   const { data, error } = await supabase
@@ -267,12 +273,9 @@ async function sendLessonChooser(chatId, session, messageId = null) {
     .order('lesson', { ascending: true });
 
   if (error || !data || data.length === 0) {
-    await sendOrEditMenu({
-      chatId,
-      messageId,
-      text: 'No lessons found for this subject.',
-      keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]],
-    });
+    await sendMenuAndStore(session, chatId,
+      'No lessons found for this subject.',
+      [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]]);
     return;
   }
 
@@ -295,15 +298,10 @@ async function sendLessonChooser(chatId, session, messageId = null) {
   }
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text: 'Select a lesson:',
-    keyboard: rows,
-  });
+  await sendMenuAndStore(session, chatId, 'Select a lesson:', rows);
 }
 
-async function sendTermChooser(chatId, session, messageId = null) {
+async function sendTermChooser(chatId, session) {
   const subjectId = session.data.subjectId;
 
   const { data, error } = await supabase
@@ -313,12 +311,9 @@ async function sendTermChooser(chatId, session, messageId = null) {
     .not('term', 'is', null);
 
   if (error || !data || data.length === 0) {
-    await sendOrEditMenu({
-      chatId,
-      messageId,
-      text: 'No terms found for this subject.',
-      keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]],
-    });
+    await sendMenuAndStore(session, chatId,
+      'No terms found for this subject.',
+      [[{ text: '⬅️ Back', callback_data: 'menu_practice' }]]);
     return;
   }
 
@@ -327,32 +322,19 @@ async function sendTermChooser(chatId, session, messageId = null) {
   const rows = [];
   terms.forEach((term) => {
     const encoded = encodeURIComponent(term);
-    rows.push([
-      {
-        text: term,
-        callback_data: `practice_term_${encoded}`,
-      },
-    ]);
+    rows.push([{ text: term, callback_data: `practice_term_${encoded}` }]);
   });
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text: 'Select a term:',
-    keyboard: rows,
-  });
+  await sendMenuAndStore(session, chatId, 'Select a term:', rows);
 }
 
-async function sendQuestionCountChooser(chatId, session, messageId = null) {
+async function sendQuestionCountChooser(chatId, session) {
   session.state = 'CHOOSING_QCOUNT';
-  await saveSession(session);
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text: 'How many questions?',
-    keyboard: [
+  await sendMenuAndStore(session, chatId,
+    'How many questions?',
+    [
       [
         { text: '10', callback_data: 'practice_qcount_10' },
         { text: '20', callback_data: 'practice_qcount_20' },
@@ -363,8 +345,7 @@ async function sendQuestionCountChooser(chatId, session, messageId = null) {
         { text: '50', callback_data: 'practice_qcount_50' },
       ],
       [{ text: '⬅️ Back', callback_data: 'menu_practice' }],
-    ],
-  });
+    ]);
 }
 
 // ---- START PRACTICE QUIZ (respects available count) ----
@@ -424,6 +405,7 @@ async function startPracticeQuiz(chatId, userId, requestedCount) {
     score: 0,
     answers: [],
     startedAt: Date.now(),
+    menu_message_id: null, // text menu no longer needed
   };
   await saveSession(session);
 
@@ -633,31 +615,32 @@ async function sendPracticeResult(chatId, session, opts = {}) {
 }
 
 // ---- WEEKLY PAPER (Top 10 via WebApp, quiz via bot) ----
-async function handleWeeklyMenu(chatId, messageId = null) {
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text: '🏆 *Weekly Paper*\nChoose your stream:',
-    keyboard: [
+async function handleWeeklyMenu(chatId, userId) {
+  const session = await getSession(userId);
+  session.state = 'WEEKLY_MENU';
+  session.data = session.data || {};
+
+  await sendMenuAndStore(session, chatId,
+    '🏆 *Weekly Paper*\nChoose your stream:',
+    [
       [
         { text: 'Bio Stream', callback_data: 'weekly_stream_bio' },
         { text: 'Maths Stream', callback_data: 'weekly_stream_maths' },
       ],
       [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
-    ],
-  });
+    ]);
 }
 
-async function handleWeeklyStream(chatId, stream, messageId = null) {
+async function handleWeeklyStream(chatId, userId, stream) {
+  const session = await getSession(userId);
+  session.state = 'WEEKLY_STREAM';
+  session.data.weekly_stream = stream === 'bio' ? 'Bio' : 'Maths';
+
   const streamLabel = stream === 'bio' ? 'Bio Stream' : 'Maths Stream';
 
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text:
-      `🏆 *Weekly Paper – ${streamLabel}*\n\n` +
-      'Attend the paper now or see the *Top 10* in the Web App.',
-    keyboard: [
+  await sendMenuAndStore(session, chatId,
+    `🏆 *Weekly Paper – ${streamLabel}*\n\nAttend the paper now or see the *Top 10* in the Web App.`,
+    [
       [
         {
           text: '✏️ Attend Paper',
@@ -671,8 +654,7 @@ async function handleWeeklyStream(chatId, stream, messageId = null) {
         },
       ],
       [{ text: '⬅️ Back', callback_data: 'menu_weekly' }],
-    ],
-  });
+    ]);
 }
 
 // ---- Start weekly quiz using weekly_questions + practice_questions ----
@@ -749,6 +731,7 @@ async function startWeeklyQuiz(chatId, userId, stream) {
     score: 0,
     answers: [],
     startedAt: Date.now(),
+    menu_message_id: null,
   };
   await saveSession(session);
 
@@ -759,18 +742,17 @@ async function startWeeklyQuiz(chatId, userId, stream) {
 }
 
 // ---- ABOUT ----
-async function handleAbout(chatId, messageId = null) {
-  await sendOrEditMenu({
-    chatId,
-    messageId,
-    text:
-      'ℹ️ *About Us*\n\n' +
+async function handleAbout(chatId, userId) {
+  const session = await getSession(userId);
+  session.state = 'ABOUT';
+
+  await sendMenuAndStore(session, chatId,
+    'ℹ️ *About Us*\n\n' +
       'This bot helps A/L students practice MCQs in Physics, Chemistry, Bio and Maths.\n' +
       '• Lesson, term and exam‑target practice\n' +
       '• Weekly mixed papers with rankings\n' +
       '• Web App is used only for registration and Top 10 leaderboard.',
-    keyboard: [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]],
-  });
+    [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]]);
 }
 
 // ---- MESSAGE HANDLER ----
@@ -819,37 +801,37 @@ async function handleCallback(callbackQuery) {
       });
       return;
     }
-    await showMainMenu(chatId, userId, studentRow, messageId);
+    const session = await getSession(userId);
+    await showMainMenu(chatId, userId, studentRow, session.data.menu_message_id);
     return;
   }
 
   if (data === 'goto_main_menu') {
     const studentRow = await isRegistered(userId);
-    await showMainMenu(chatId, userId, studentRow || {}, messageId);
+    const session = await getSession(userId);
+    await showMainMenu(chatId, userId, studentRow || {}, session.data.menu_message_id);
     return;
   }
 
   // MAIN MENU buttons:
-  // - from photo → create a new text menu (messageId = null)
-  // - from existing text menu (e.g. back buttons) → edit that text message
   if (data === 'menu_practice') {
-    await handlePracticeMenu(chatId, userId, isPhotoMessage ? null : messageId);
+    await handlePracticeMenu(chatId, userId);
     return;
   }
 
   if (data === 'menu_weekly') {
-    await handleWeeklyMenu(chatId, isPhotoMessage ? null : messageId);
+    await handleWeeklyMenu(chatId, userId);
     return;
   }
 
   if (data === 'menu_about') {
-    await handleAbout(chatId, isPhotoMessage ? null : messageId);
+    await handleAbout(chatId, userId);
     return;
   }
 
   if (data.startsWith('practice_subject_')) {
     const id = parseInt(data.split('_').pop(), 10);
-    await handleSubjectChosen(chatId, userId, id, messageId);
+    await handleSubjectChosen(chatId, userId, id);
     return;
   }
 
@@ -868,11 +850,11 @@ async function handleCallback(callbackQuery) {
     await saveSession(session);
 
     if (session.data.practiceType === 'lesson') {
-      await sendLessonChooser(chatId, session, messageId);
+      await sendLessonChooser(chatId, session);
     } else if (session.data.practiceType === 'term') {
-      await sendTermChooser(chatId, session, messageId);
+      await sendTermChooser(chatId, session);
     } else {
-      await sendQuestionCountChooser(chatId, session, messageId);
+      await sendQuestionCountChooser(chatId, session);
     }
     return;
   }
@@ -882,7 +864,7 @@ async function handleCallback(callbackQuery) {
     const session = await getSession(userId);
     session.data.lesson = lesson;
     await saveSession(session);
-    await sendQuestionCountChooser(chatId, session, messageId);
+    await sendQuestionCountChooser(chatId, session);
     return;
   }
 
@@ -892,17 +874,26 @@ async function handleCallback(callbackQuery) {
     const session = await getSession(userId);
     session.data.term = term;
     await saveSession(session);
-    await sendQuestionCountChooser(chatId, session, messageId);
+    await sendQuestionCountChooser(chatId, session);
     return;
   }
 
   if (data.startsWith('practice_qcount_')) {
     const qcount = parseInt(data.split('_').pop(), 10);
 
-    await callTelegram('deleteMessage', {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    // delete the text menu message before starting quiz
+    const session = await getSession(userId);
+    const menuId = session.data.menu_message_id;
+    if (menuId) {
+      try {
+        await callTelegram('deleteMessage', {
+          chat_id: chatId,
+          message_id: menuId,
+        });
+      } catch (e) {
+        console.error('delete menu before quiz error', e);
+      }
+    }
 
     await startPracticeQuiz(chatId, userId, qcount);
     return;
@@ -920,28 +911,44 @@ async function handleCallback(callbackQuery) {
   }
 
   if (data === 'weekly_stream_bio') {
-    await handleWeeklyStream(chatId, 'bio', messageId);
+    await handleWeeklyStream(chatId, userId, 'bio');
     return;
   }
   if (data === 'weekly_stream_maths') {
-    await handleWeeklyStream(chatId, 'maths', messageId);
+    await handleWeeklyStream(chatId, userId, 'maths');
     return;
   }
 
   if (data === 'weekly_attend_bio') {
-    await callTelegram('deleteMessage', {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    const session = await getSession(userId);
+    const menuId = session.data.menu_message_id;
+    if (menuId) {
+      try {
+        await callTelegram('deleteMessage', {
+          chat_id: chatId,
+          message_id: menuId,
+        });
+      } catch (e) {
+        console.error('delete weekly menu error', e);
+      }
+    }
     await startWeeklyQuiz(chatId, userId, 'bio');
     return;
   }
 
   if (data === 'weekly_attend_maths') {
-    await callTelegram('deleteMessage', {
-      chat_id: chatId,
-      message_id: messageId,
-    });
+    const session = await getSession(userId);
+    const menuId = session.data.menu_message_id;
+    if (menuId) {
+      try {
+        await callTelegram('deleteMessage', {
+          chat_id: chatId,
+          message_id: menuId,
+        });
+      } catch (e) {
+        console.error('delete weekly menu error', e);
+      }
+    }
     await startWeeklyQuiz(chatId, userId, 'maths');
     return;
   }

@@ -1,19 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
 // --- ENVIRONMENT VARIABLES ---
-// Set these in Vercel Dashboard → Settings → Environment Variables
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;          // e.g. 12345:ABC...
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-const CHANNEL_USERNAME = process.env.TELEGRAM_CHANNEL_USERNAME; // e.g. @YourChannel
-const CHANNEL_URL = process.env.TELEGRAM_CHANNEL_URL;           // e.g. https://t.me/YourChannel
+const CHANNEL_USERNAME = process.env.TELEGRAM_CHANNEL_USERNAME;
+const CHANNEL_URL = process.env.TELEGRAM_CHANNEL_URL;
 
-const WEBAPP_URL = process.env.WEBAPP_URL;                      // registration mini-app
+const WEBAPP_URL = process.env.WEBAPP_URL;              // registration mini-app
 const HELP_URL = process.env.HELP_URL || 'https://t.me/your_help_link';
-const TOP10_WEBAPP_URL = process.env.TOP10_WEBAPP_URL || WEBAPP_URL; // leaderboard mini-app
+const TOP10_WEBAPP_URL = process.env.TOP10_WEBAPP_URL || WEBAPP_URL;
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;     // or anon if RLS disabled
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -158,7 +157,7 @@ async function handleStart(msg) {
     return;
   }
 
-  // 3) Registered → Main menu (new message first time)
+  // 3) Registered → Main menu
   await showMainMenu(chatId, userId, studentRow, null);
 }
 
@@ -348,7 +347,7 @@ async function sendQuestionCountChooser(chatId, session, messageId = null) {
   });
 }
 
-// ---- START PRACTICE QUIZ (updated) ----
+// ---- START PRACTICE QUIZ (respects available count) ----
 async function startPracticeQuiz(chatId, userId, requestedCount) {
   let session = await getSession(userId);
   const { subjectId, practiceType, lesson, term } = session.data;
@@ -399,7 +398,7 @@ async function startPracticeQuiz(chatId, userId, requestedCount) {
   session.data = {
     ...session.data,
     mode: 'practice',
-    qcount: finalCount,      // store real count
+    qcount: finalCount,
     questions,
     currentIndex: 0,
     score: 0,
@@ -415,12 +414,15 @@ function answerLabel(idx) {
   return ['A', 'B', 'C', 'D'][idx - 1] || '?';
 }
 
+// ---- COMMON QUESTION SENDER (works for practice & weekly) ----
 async function sendCurrentQuestion(chatId, session) {
-  const { questions, currentIndex, qcount, subjectId } = session.data;
+  const { questions, currentIndex, qcount } = session.data;
   const q = questions[currentIndex];
 
+  const subjectName = subjectLabel(q.subject_id);
+
   const text =
-    `*Q${currentIndex + 1}/${qcount} - ${subjectLabel(subjectId)}*\n\n` +
+    `*Q${currentIndex + 1}/${qcount} - ${subjectName}*\n\n` +
     `${q.question}\n\n` +
     `A) ${q.answer_1}\n` +
     `B) ${q.answer_2}\n` +
@@ -447,6 +449,7 @@ async function sendCurrentQuestion(chatId, session) {
   });
 }
 
+// ---- ANSWER HANDLER (shared) ----
 async function handleQuizAnswer(callbackQuery, chosenIndex) {
   const userId = callbackQuery.from.id;
   const chatId = callbackQuery.message.chat.id;
@@ -487,7 +490,6 @@ async function handleQuizAnswer(callbackQuery, chosenIndex) {
 
   // Next or finish?
   if (currentIndex + 1 >= totalQuestions) {
-    // Finished
     session.state = 'QUIZ_FINISHED';
     await saveSession(session);
     await sendPracticeResult(chatId, session);
@@ -526,28 +528,30 @@ async function handleQuizGiveUp(chatId, userId) {
   await sendPracticeResult(chatId, session, { gaveUp: true });
 }
 
+// ---- RESULT (practice only; weekly not saved) ----
 async function sendPracticeResult(chatId, session, opts = {}) {
-  const { qcount, score } = session.data;
+  const { qcount, score, mode } = session.data;
   const gaveUp = opts.gaveUp;
+  const isWeekly = mode === 'weekly';
 
   const text =
-    `📊 *Practice session finished*\n\n` +
+    `📊 *${isWeekly ? 'Weekly paper' : 'Practice session'} finished*\n\n` +
     `Score: *${score}/${qcount}*\n` +
     (gaveUp ? '_You ended the quiz early._\n\n' : '\n') +
-    'Tap *Main Menu* to practice again or try the weekly paper.';
+    'Tap *Main Menu* to continue.';
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        [{ text: '🏠 Main Menu', callback_data: 'goto_main_menu' }],
-      ],
+      inline_keyboard: [[{ text: '🏠 Main Menu', callback_data: 'goto_main_menu' }]],
     },
   });
 
-  // Optional: store results into practice_sessions table (simplified)
+  // Save only practice sessions (not weekly)
+  if (isWeekly) return;
+
   try {
     const studentRow = await isRegistered(session.telegram_id);
     const correct = score;
@@ -573,7 +577,7 @@ async function sendPracticeResult(chatId, session, opts = {}) {
   }
 }
 
-// ---- WEEKLY PAPER (Top 10 opens WebApp) ----
+// ---- WEEKLY PAPER (Top 10 via WebApp, quiz via bot) ----
 async function handleWeeklyMenu(chatId, messageId = null) {
   await sendOrEditMenu({
     chatId,
@@ -597,9 +601,14 @@ async function handleWeeklyStream(chatId, stream, messageId = null) {
     messageId,
     text:
       `🏆 *Weekly Paper – ${streamLabel}*\n\n` +
-      'Attend the paper via bot (coming soon) and see the *Top 10* in the Web App.',
+      'Attend the paper now or see the *Top 10* in the Web App.',
     keyboard: [
-      [{ text: '✏️ Attend Paper (soon)', callback_data: 'noop' }],
+      [
+        {
+          text: '✏️ Attend Paper',
+          callback_data: stream === 'bio' ? 'weekly_attend_bio' : 'weekly_attend_maths',
+        },
+      ],
       [
         {
           text: '🏅 View Top 10',
@@ -609,6 +618,89 @@ async function handleWeeklyStream(chatId, stream, messageId = null) {
       [{ text: '⬅️ Back', callback_data: 'menu_weekly' }],
     ],
   });
+}
+
+// Start weekly quiz using weekly_paper_questions + weekly_question_bank
+async function startWeeklyQuiz(chatId, userId, stream) {
+  let session = await getSession(userId);
+
+  // Latest weekly paper
+  const { data: papers, error: pErr } = await supabase
+    .from('weekly_papers')
+    .select('id, week_start')
+    .order('week_start', { ascending: false })
+    .limit(1);
+
+  if (pErr || !papers || papers.length === 0) {
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text: 'Weekly paper is not available yet.',
+    });
+    return;
+  }
+
+  const weeklyPaperId = papers[0].id;
+  const streamColumn = stream === 'bio' ? 'bio_stream' : 'maths_stream';
+
+  const { data: wpq, error: qErr } = await supabase
+    .from('weekly_paper_questions')
+    .select('question_id')
+    .eq('weekly_paper_id', weeklyPaperId)
+    .eq(streamColumn, true)
+    .order('id');
+
+  if (qErr || !wpq || wpq.length === 0) {
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text: 'No questions found for this weekly paper.',
+    });
+    return;
+  }
+
+  const qIds = wpq.map((r) => r.question_id);
+
+  const { data: questions, error: qbErr } = await supabase
+    .from('weekly_question_bank')
+    .select('*')
+    .in('id', qIds);
+
+  if (qbErr || !questions || questions.length === 0) {
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text: 'Failed to load weekly paper questions.',
+    });
+    return;
+  }
+
+  const map = new Map(questions.map((q) => [q.id, q]));
+  const orderedQuestions = wpq
+    .map((r) => map.get(r.question_id))
+    .filter(Boolean);
+
+  if (orderedQuestions.length === 0) {
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text: 'Failed to prepare weekly paper questions.',
+    });
+    return;
+  }
+
+  session.state = 'QUIZ_ACTIVE';
+  session.data = {
+    ...session.data,
+    mode: 'weekly',
+    weekly_paper_id: weeklyPaperId,
+    weekly_stream: stream,
+    qcount: orderedQuestions.length,
+    questions: orderedQuestions,
+    currentIndex: 0,
+    score: 0,
+    answers: [],
+    startedAt: Date.now(),
+  };
+  await saveSession(session);
+
+  await sendCurrentQuestion(chatId, session);
 }
 
 // ---- ABOUT ----
@@ -650,7 +742,6 @@ async function handleCallback(callbackQuery) {
   const userId = callbackQuery.from.id;
   const messageId = callbackQuery.message.message_id;
 
-  // Acknowledge callback to remove "loading" state
   await callTelegram('answerCallbackQuery', {
     callback_query_id: callbackQuery.id,
   });
@@ -747,7 +838,6 @@ async function handleCallback(callbackQuery) {
   if (data.startsWith('practice_qcount_')) {
     const qcount = parseInt(data.split('_').pop(), 10);
 
-    // delete the question-count menu before starting quiz
     await callTelegram('deleteMessage', {
       chat_id: chatId,
       message_id: messageId,
@@ -779,6 +869,24 @@ async function handleCallback(callbackQuery) {
   }
   if (data === 'weekly_stream_maths') {
     await handleWeeklyStream(chatId, 'maths', messageId);
+    return;
+  }
+
+  if (data === 'weekly_attend_bio') {
+    await callTelegram('deleteMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+    await startWeeklyQuiz(chatId, userId, 'bio');
+    return;
+  }
+
+  if (data === 'weekly_attend_maths') {
+    await callTelegram('deleteMessage', {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+    await startWeeklyQuiz(chatId, userId, 'maths');
     return;
   }
 

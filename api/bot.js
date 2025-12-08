@@ -348,8 +348,8 @@ async function sendQuestionCountChooser(chatId, session, messageId = null) {
   });
 }
 
-// ---- START PRACTICE QUIZ ----
-async function startPracticeQuiz(chatId, userId, qcount) {
+// ---- START PRACTICE QUIZ (updated) ----
+async function startPracticeQuiz(chatId, userId, requestedCount) {
   let session = await getSession(userId);
   const { subjectId, practiceType, lesson, term } = session.data;
 
@@ -375,19 +375,31 @@ async function startPracticeQuiz(chatId, userId, qcount) {
     return;
   }
 
+  const availableCount = data.length;
+  const finalCount = Math.min(requestedCount, availableCount);
+
+  if (availableCount < requestedCount) {
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text:
+        `Only ${availableCount} questions are available for this selection.\n` +
+        `You will practice ${finalCount} questions.`,
+    });
+  }
+
   // Shuffle
   const shuffled = [...data];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  const questions = shuffled.slice(0, qcount);
+  const questions = shuffled.slice(0, finalCount);
 
   session.state = 'QUIZ_ACTIVE';
   session.data = {
     ...session.data,
     mode: 'practice',
-    qcount,
+    qcount: finalCount,      // store real count
     questions,
     currentIndex: 0,
     score: 0,
@@ -471,8 +483,10 @@ async function handleQuizAnswer(callbackQuery, chosenIndex) {
     parse_mode: 'Markdown',
   });
 
+  const totalQuestions = questions.length;
+
   // Next or finish?
-  if (currentIndex + 1 >= data.qcount) {
+  if (currentIndex + 1 >= totalQuestions) {
     // Finished
     session.state = 'QUIZ_FINISHED';
     await saveSession(session);

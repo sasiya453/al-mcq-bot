@@ -169,14 +169,7 @@ async function handleStart(msg) {
 async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
   const name = studentRow?.full_name || 'Student';
 
-  // reset session state and clear tracked text-menu id
-  await saveSession({
-    telegram_id: userId,
-    state: 'IDLE',
-    data: { student_id: studentRow?.id || null, menu_message_id: null },
-  });
-
-  // delete existing text menu if we know it
+  // delete existing text menu if we know it (e.g. from goto_main_menu)
   if (textMenuId) {
     try {
       await callTelegram('deleteMessage', {
@@ -188,8 +181,8 @@ async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
     }
   }
 
-  // send main menu as photo with caption + inline buttons
-  await callTelegram('sendPhoto', {
+  // send main menu as photo with caption + buttons
+  const res = await callTelegram('sendPhoto', {
     chat_id: chatId,
     photo: 'https://t.me/MyBotDatabase/3',
     caption:
@@ -205,25 +198,23 @@ async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
       ],
     },
   });
-}
 
-// helper: send/edit unified text menu and store its message_id
-async function sendMenuAndStore(session, chatId, text, keyboard) {
-  const existingId = session.data.menu_message_id || null;
+  const mainMenuId = res?.result?.message_id || null;
 
-  const res = await sendOrEditMenu({
-    chatId,
-    messageId: existingId,
-    text,
-    keyboard,
-  });
-
-  const newId = res?.result?.message_id ?? existingId;
-  session.data.menu_message_id = newId;
+  // update session: track the main-menu photo id, reset text menu id
+  const session = await getSession(userId);
+  session.state = 'IDLE';
+  session.data = {
+    ...(session.data || {}),
+    student_id: studentRow?.id || null,
+    main_menu_message_id: mainMenuId,
+    menu_message_id: null,
+    // result info is cleared when we go to main menu
+    last_result_base: null,
+    last_result_message_id: null,
+  };
   await saveSession(session);
-  return newId;
 }
-
 // ---- PRACTICE FLOW ----
 async function handlePracticeMenu(chatId, userId) {
   const session = await getSession(userId);
@@ -892,51 +883,50 @@ async function handleCallback(callbackQuery) {
   // 4) MAIN MENU buttons (on the photo):
   //    When clicked, delete the photo message and open a text menu.
 
-  if (data === 'menu_practice') {
-    if (isPhoto) {
+  // ----- MAIN MENU buttons (on the photo or elsewhere) -----
+  if (data === 'menu_practice' || data === 'menu_weekly' || data === 'menu_about') {
+    const session = await getSession(userId);
+
+    // Always try to delete the stored main menu photo, if any
+    const mainId = session.data.main_menu_message_id;
+    if (mainId) {
       try {
-        await callTelegram('deleteMessage', { chat_id: chatId, message_id });
+        await callTelegram('deleteMessage', { chat_id: chatId, message_id: mainId });
       } catch (e) {
-        console.error('delete main menu photo (practice) error', e);
+        console.error('delete main menu photo error', e);
       }
-      const session = await getSession(userId);
-      session.data.menu_message_id = null;
+      session.data.main_menu_message_id = null;
       await saveSession(session);
     }
-    await handlePracticeMenu(chatId, userId);
-    return;
-  }
 
-  if (data === 'menu_weekly') {
-    if (isPhoto) {
-      try {
-        await callTelegram('deleteMessage', { chat_id: chatId, message_id });
-      } catch (e) {
-        console.error('delete main menu photo (weekly) error', e);
+    // Also, if this callback came from some other menu message, delete that too
+    // (e.g. "Back to subjects" -> menu_practice)
+    if (!mainId || mainId !== messageId) {
+      // optional: only delete if this is a text menu (no photo)
+      if (!isPhoto) {
+        try {
+          await callTelegram('deleteMessage', { chat_id: chatId, message_id: messageId });
+        } catch (e) {
+          console.error('delete current menu (menu_*) error', e);
+        }
       }
-      const session = await getSession(userId);
-      session.data.menu_message_id = null;
-      await saveSession(session);
     }
-    await handleWeeklyMenu(chatId, userId);
+
+    // Reset tracked text menu id; the called handler will create a new one
+    session.data.menu_message_id = null;
+    await saveSession(session);
+
+    // Route to the correct submenu
+    if (data === 'menu_practice') {
+      await handlePracticeMenu(chatId, userId);
+    } else if (data === 'menu_weekly') {
+      await handleWeeklyMenu(chatId, userId);
+    } else if (data === 'menu_about') {
+      await handleAbout(chatId, userId);
+    }
     return;
   }
-
-  if (data === 'menu_about') {
-    if (isPhoto) {
-      try {
-        await callTelegram('deleteMessage', { chat_id: chatId, message_id });
-      } catch (e) {
-        console.error('delete main menu photo (about) error', e);
-      }
-      const session = await getSession(userId);
-      session.data.menu_message_id = null;
-      await saveSession(session);
-    }
-    await handleAbout(chatId, userId);
-    return;
-  }
-
+  
   // 5) PRACTICE NAVIGATION
 
   if (data.startsWith('practice_subject_')) {

@@ -832,18 +832,16 @@ async function handleCallback(callbackQuery) {
 
     const studentRow = await isRegistered(userId);
     if (!studentRow) {
-      // Still not registered → show registration video again
       await sendRegistrationPrompt(chatId);
       return;
     }
-    // Registered → show main menu
     await showMainMenu(chatId, userId, studentRow, null);
     return;
   }
 
   // 3) "Main Menu" button from either:
-  //    - result message (we edit it), or
-  //    - text menus (we delete that menu)
+  //    - result message  → edit it (keep analytics)
+  //    - text menus      → delete menu message(s)
   if (data === 'goto_main_menu') {
     const session = await getSession(userId);
     const studentRow = await isRegistered(userId);
@@ -853,7 +851,7 @@ async function handleCallback(callbackQuery) {
     const isResultMessage = resultMsgId && resultMsgId === messageId;
 
     if (isResultMessage) {
-      // Came from the RESULT message: edit it (remove button + hint)
+      // Came from the RESULT message: edit it to base text and remove buttons
       try {
         await callTelegram('editMessageText', {
           chat_id: chatId,
@@ -868,16 +866,22 @@ async function handleCallback(callbackQuery) {
       session.data.last_result_message_id = null;
       await saveSession(session);
     } else {
-      // Came from a TEXT MENU (Practice/Weekly/About): delete that menu message
-      try {
-        await callTelegram('deleteMessage', { chat_id: chatId, message_id });
-      } catch (e) {
-        console.error('delete menu on goto_main_menu error', e);
+      // Came from a TEXT MENU (Practice / Weekly / About):
+      // try deleting both the triggering message and the tracked menu_message_id
+      const idsToDelete = new Set(
+        [messageId, session.data.menu_message_id].filter(Boolean)
+      );
+
+      for (const id of idsToDelete) {
+        try {
+          await callTelegram('deleteMessage', { chat_id: chatId, message_id: id });
+        } catch (e) {
+          console.error('delete menu on goto_main_menu error', e);
+        }
       }
-      if (session.data.menu_message_id === messageId) {
-        session.data.menu_message_id = null;
-        await saveSession(session);
-      }
+
+      session.data.menu_message_id = null;
+      await saveSession(session);
     }
 
     // Show fresh main-menu photo at the bottom
@@ -886,7 +890,7 @@ async function handleCallback(callbackQuery) {
   }
 
   // 4) MAIN MENU buttons (on the photo):
-  //    When clicked, we delete the photo message and open a text menu.
+  //    When clicked, delete the photo message and open a text menu.
 
   if (data === 'menu_practice') {
     if (isPhoto) {

@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 // --- ENVIRONMENT VARIABLES ---
 // Set these in Vercel Dashboard → Settings → Environment Variables
@@ -9,7 +8,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const CHANNEL_USERNAME = process.env.TELEGRAM_CHANNEL_USERNAME; // e.g. @YourChannel
 const CHANNEL_URL = process.env.TELEGRAM_CHANNEL_URL;           // e.g. https://t.me/YourChannel
 
-const WEBAPP_URL = process.env.WEBAPP_URL;                      // registration / main mini-app
+const WEBAPP_URL = process.env.WEBAPP_URL;                      // registration / analytics mini-app
 const HELP_URL = process.env.HELP_URL || 'https://t.me/your_help_link';
 const TOP10_WEBAPP_URL = process.env.TOP10_WEBAPP_URL || WEBAPP_URL; // leaderboard mini-app
 
@@ -109,131 +108,6 @@ async function saveSession(session) {
     updated_at: new Date().toISOString(),
   });
   if (error) console.error('saveSession error', error);
-}
-
-// ---- TEXT WRAP + PDF GENERATION ----
-function wrapText(text, maxChars = 100) {
-  if (!text) return [];
-  const words = text.split(/\s+/);
-  const lines = [];
-  let line = '';
-  for (const w of words) {
-    if ((line + ' ' + w).trim().length > maxChars) {
-      lines.push(line.trim());
-      line = w;
-    } else {
-      line += ' ' + w;
-    }
-  }
-  if (line.trim()) lines.push(line.trim());
-  return lines;
-}
-
-function answerLabel(idx) {
-  return ['A', 'B', 'C', 'D'][idx - 1] || '?';
-}
-
-async function createPdfForSession(session, questionsById) {
-  const pdfDoc = await PDFDocument.create();
-  let page = pdfDoc.addPage();
-  const width = page.getWidth();
-  const height = page.getHeight();
-  const margin = 40;
-  let y = height - margin;
-
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  function addPage() {
-    page = pdfDoc.addPage();
-    y = height - margin;
-  }
-
-  function drawLines(text, { bold = false, size = 11 } = {}) {
-    const fontUsed = bold ? boldFont : font;
-    const lines = wrapText(text, 100);
-    for (const line of lines) {
-      if (y < margin) addPage();
-      page.drawText(line, { x: margin, y, size, font: fontUsed });
-      y -= size + 2;
-    }
-  }
-
-  const { qcount, score } = session.data;
-
-  drawLines('A/L MCQ Practice Session', { bold: true, size: 16 });
-  y -= 4;
-  drawLines(`Score: ${score}/${qcount}`, { bold: true });
-  y -= 8;
-
-  session.data.answers.forEach((ans, idx) => {
-    const q = questionsById.get(ans.question_id);
-    if (!q) return;
-
-    if (y < margin + 60) addPage();
-
-    drawLines(`Q${idx + 1}. ${q.question}`, { bold: true });
-    drawLines(`A) ${q.answer_1}`);
-    drawLines(`B) ${q.answer_2}`);
-    drawLines(`C) ${q.answer_3}`);
-    drawLines(`D) ${q.answer_4}`);
-    drawLines(
-      `Your answer: ${answerLabel(ans.chosen_answer)}   |   Correct: ${answerLabel(
-        ans.correct_answer
-      )}`,
-      { size: 10 }
-    );
-    if (q.explanation) {
-      drawLines(`Explanation: ${q.explanation}`, { size: 10 });
-    }
-    y -= 8;
-  });
-
-  const pdfBytes = await pdfDoc.save();
-  return pdfBytes; // Uint8Array
-}
-
-async function handleGetPdf(chatId, userId) {
-  const session = await getSession(userId);
-
-  if (!session || !session.data || !session.data.answers || session.data.answers.length === 0) {
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
-      text: 'No finished practice session found to create a PDF.',
-    });
-    return;
-  }
-
-  const questionIds = session.data.answers.map((a) => a.question_id);
-  const { data: questions, error } = await supabase
-    .from('practice_questions')
-    .select('*')
-    .in('id', questionIds);
-
-  if (error || !questions) {
-    console.error('PDF questions fetch error', error);
-    await callTelegram('sendMessage', {
-      chat_id: chatId,
-      text: 'Failed to load questions for PDF.',
-    });
-    return;
-  }
-
-  const questionsById = new Map(questions.map((q) => [q.id, q]));
-  const pdfBytes = await createPdfForSession(session, questionsById);
-
-  const formData = new FormData();
-  formData.append('chat_id', String(chatId));
-  formData.append(
-    'document',
-    new Blob([pdfBytes], { type: 'application/pdf' }),
-    'al_mcq_session.pdf'
-  );
-
-  await fetch(`${TELEGRAM_API}/sendDocument`, {
-    method: 'POST',
-    body: formData,
-  });
 }
 
 // ---- MAIN GATEKEEPER FLOW ----
@@ -525,6 +399,10 @@ async function startPracticeQuiz(chatId, userId, qcount) {
   await sendCurrentQuestion(chatId, session);
 }
 
+function answerLabel(idx) {
+  return ['A', 'B', 'C', 'D'][idx - 1] || '?';
+}
+
 async function sendCurrentQuestion(chatId, session) {
   const { questions, currentIndex, qcount, subjectId } = session.data;
   const q = questions[currentIndex];
@@ -642,7 +520,7 @@ async function sendPracticeResult(chatId, session, opts = {}) {
     `📊 *Practice session finished*\n\n` +
     `Score: *${score}/${qcount}*\n` +
     (gaveUp ? '_You ended the quiz early._\n\n' : '\n') +
-    'Tap *Get PDF here* to download this session as a PDF.';
+    'Open the Web App to see detailed analytics of your performance.';
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
@@ -650,10 +528,9 @@ async function sendPracticeResult(chatId, session, opts = {}) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [{ text: '📄 Get PDF here', callback_data: 'get_pdf' }],
         [
           {
-            text: '🌐 Open Web App (Analytics)',
+            text: '📊 Open Web App (Analytics)',
             web_app: { url: WEBAPP_URL },
           },
         ],
@@ -736,7 +613,7 @@ async function handleAbout(chatId, messageId = null) {
       'This bot helps A/L students practice MCQs in Physics, Chemistry, Bio and Maths.\n' +
       '• Lesson, term and exam‑target practice\n' +
       '• Weekly mixed papers with rankings\n' +
-      '• Detailed analytics and PDFs in the Web App.',
+      '• Detailed analytics in the Web App.',
     keyboard: [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]],
   });
 }
@@ -894,11 +771,6 @@ async function handleCallback(callbackQuery) {
   }
   if (data === 'weekly_stream_maths') {
     await handleWeeklyStream(chatId, 'maths', messageId);
-    return;
-  }
-
-  if (data === 'get_pdf') {
-    await handleGetPdf(chatId, userId);
     return;
   }
 

@@ -8,7 +8,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const CHANNEL_USERNAME = process.env.TELEGRAM_CHANNEL_USERNAME; // e.g. @YourChannel
 const CHANNEL_URL = process.env.TELEGRAM_CHANNEL_URL;           // e.g. https://t.me/YourChannel
 
-const WEBAPP_URL = process.env.WEBAPP_URL;                      // registration / analytics mini-app
+const WEBAPP_URL = process.env.WEBAPP_URL;                      // registration mini-app
 const HELP_URL = process.env.HELP_URL || 'https://t.me/your_help_link';
 const TOP10_WEBAPP_URL = process.env.TOP10_WEBAPP_URL || WEBAPP_URL; // leaderboard mini-app
 
@@ -520,7 +520,7 @@ async function sendPracticeResult(chatId, session, opts = {}) {
     `📊 *Practice session finished*\n\n` +
     `Score: *${score}/${qcount}*\n` +
     (gaveUp ? '_You ended the quiz early._\n\n' : '\n') +
-    'Open the Web App to see detailed analytics of your performance.';
+    'Tap *Main Menu* to practice again or try the weekly paper.';
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
@@ -528,12 +528,6 @@ async function sendPracticeResult(chatId, session, opts = {}) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [
-          {
-            text: '📊 Open Web App (Analytics)',
-            web_app: { url: WEBAPP_URL },
-          },
-        ],
         [{ text: '🏠 Main Menu', callback_data: 'goto_main_menu' }],
       ],
     },
@@ -589,7 +583,7 @@ async function handleWeeklyStream(chatId, stream, messageId = null) {
     messageId,
     text:
       `🏆 *Weekly Paper – ${streamLabel}*\n\n` +
-      'Attend the paper via bot (soon) and see Top 10 in the Web App.',
+      'Attend the paper via bot (coming soon) and see the *Top 10* in the Web App.',
     keyboard: [
       [{ text: '✏️ Attend Paper (soon)', callback_data: 'noop' }],
       [
@@ -613,7 +607,7 @@ async function handleAbout(chatId, messageId = null) {
       'This bot helps A/L students practice MCQs in Physics, Chemistry, Bio and Maths.\n' +
       '• Lesson, term and exam‑target practice\n' +
       '• Weekly mixed papers with rankings\n' +
-      '• Detailed analytics in the Web App.',
+      '• Web App is used only for registration and Top 10 leaderboard.',
     keyboard: [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]],
   });
 }

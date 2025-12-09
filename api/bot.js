@@ -140,7 +140,7 @@ async function handleStart(msg) {
   if (!member) {
     await callTelegram('sendPhoto', {
       chat_id: chatId,
-      photo: 'https://t.me/MyBotDatabase/2',
+      photo: 'https://t.me/MyBotDatabase/7',
       caption:
         '📢 Please join our channel before using the A/L MCQ bot.\n\n' +
         'After joining, tap "Done & Start".',
@@ -191,7 +191,7 @@ async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
   // send main menu as photo with caption + inline buttons
   await callTelegram('sendPhoto', {
     chat_id: chatId,
-    photo: 'https://t.me/MyBotDatabase/3',
+    photo: 'https://t.me/MyBotDatabase/8',
     caption:
       `👋 Hi *${name}*!\n` +
       'Welcome to the A/L MCQ practice bot.\n\n' +

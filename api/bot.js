@@ -130,8 +130,9 @@ async function sendRegistrationPrompt(chatId) {
     chat_id: chatId,
     video: 'https://t.me/MyBotDatabase/4',
     caption:
-      '👋 Welcome to A/L MCQ Bot.\n\n' +
-      'You are *not registered* yet. Please sign up using the Web App.\n\n' +
+      '👋 *Welcome to A/L MCQ Bot*\n\n' +
+      '*You are not registered yet.* Please sign up using the Web App.\n\n' +
+      '*Steps:*\n' +
       '1️⃣ Tap *Register / Login*\n' +
       '2️⃣ Complete the form\n' +
       '3️⃣ Return here and tap *I have registered*.',
@@ -157,8 +158,9 @@ async function handleStart(msg) {
       chat_id: chatId,
       photo: 'https://t.me/MyBotDatabase/7',
       caption:
-        '📢 Please join our channel before using the A/L MCQ bot.\n\n' +
-        'After joining, tap "Done & Start".',
+        '*📢 Join our channel first*\n\n' +
+        'To use the *A/L MCQ bot*, please join our channel.\n\n' +
+        'After joining, tap *"Done & Start"*.',
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
@@ -208,10 +210,12 @@ async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
     chat_id: chatId,
     photo: 'https://t.me/MyBotDatabase/8',
     caption:
-      `Hi ${name}! 👋 ✨ Welcome to the A/L MCQ practice bot. 🤖 (AL MCQ BOT වෙතට ඔබව සාදරයෙන් පිළිගන්නවා.)\n\n` +
-      '👇 Choose an option:  \n\n' +
-      '📝 Practice MCQs (ඔබට අවශ්‍ය විශයට අදාල බහුවරණ, පාඩම් වශයෙන්, වාර වශයෙන් හෝ උසස් පෙල විභාගයට අදාලව පුහුණුවීම් කරන්න.)  \n' +
-      '📅 Weekly Paper (සතිපතා ලැබෙන ප්‍රශ්ණ පත්‍රය ලියා ඔබගේ මට්ටම මැනගන්න.)',
+      `*Hi ${name}!* 👋\n` +
+      `*Welcome to the A/L MCQ practice bot.* 🤖\n` +
+      `_(AL MCQ BOT වෙතට ඔබව සාදරයෙන් පිළිගන්නවා.)_\n\n` +
+      '*👇 Choose an option:*  \n\n' +
+      '📝 *Practice MCQs* – _ඔබට අවශ්‍ය විශයට අදාල බහුවරණ, පාඩම් වශයෙන්, වාර වශයෙන් හෝ උසස් පෙල විභාගයට අදාලව පුහුණුවීම් කරන්න._  \n' +
+      '📅 *Weekly Paper* – _සතිපතා ලැබෙන ප්‍රශ්ණ පත්‍රය ලියා ඔබගේ මට්ටම මැනගන්න._',
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
@@ -221,7 +225,6 @@ async function showMainMenu(chatId, userId, studentRow, textMenuId = null) {
       ],
     },
   });
-}
 
 // helper: send/edit unified text menu and store its message_id
 async function sendMenuAndStore(session, chatId, text, keyboard) {
@@ -249,11 +252,12 @@ async function handlePracticeMenu(chatId, userId) {
   await sendMenuAndStore(
     session,
     chatId,
-    '📚 Practice MCQs Select a subject (ඔබට අවශ්‍ය විශය තෝරන්න) 👇:\n\n' +
-      '⚛️ Physics (භෞතික විද්‍යාව)  \n' +
-      '🧪 Chemistry (රසායන විද්‍යාව)  \n' +
-      '🧬 Bio (ජීව විද්‍යාව)  \n' +
-      '📐 Maths (සං‍යුක්ත ගණිතය)',
+    '*📚 Practice MCQs*\n' +
+      '*Select a subject* _(ඔබට අවශ්‍ය විශය තෝරන්න)_ 👇:\n\n' +
+      '*Physics* _(භෞතික විද්‍යාව)_ ⚛️  \n' +
+      '*Chemistry* _(රසායන විද්‍යාව)_ 🧪  \n' +
+      '*Bio* _(ජීව විද්‍යාව)_ 🧬  \n' +
+      '*Maths* _(සං‍යුක්ත ගණිතය)_ 📐',
     [
       [
         { text: 'Physics', callback_data: 'practice_subject_1' },
@@ -266,7 +270,6 @@ async function handlePracticeMenu(chatId, userId) {
       [{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }],
     ]
   );
-}
 
 function subjectLabel(id) {
   return { 1: 'Physics', 2: 'Chemistry', 3: 'Bio', 4: 'Maths' }[id] || 'Subject';
@@ -280,10 +283,11 @@ async function handleSubjectChosen(chatId, userId, subjectId) {
   await sendMenuAndStore(
     session,
     chatId,
-    `✅ ${subjectLabel(subjectId)} selected. What do you want to practice? 🤔 (ඔබට පුහුණු වීමට අවශ්‍ය ක්‍රමය තෝරන්න)  \n\n` +
-      `📖 Lesson target MCQs (තෝරාගන්නා පාඩමකට අදාල බහුවරණ)  \n` +
-      `🎓 A/L exam target MCQs (මුලු විෂය නිර්දේශයම ආවරණය වන පරිදි බහුවරණ)  \n` +
-      `🗓️ Term test target MCQs (යම් වාරයකට අදාල බහුවරණ)`,
+    `✅ *${subjectLabel(subjectId)} selected.*\n` +
+      `*What do you want to practice?* 🤔 _(ඔබට පුහුණු වීමට අවශ්‍ය ක්‍රමය තෝරන්න)_  \n\n` +
+      `📖 *Lesson target MCQs* _(තෝරාගන්නා පාඩමකට අදාල බහුවරණ)_  \n` +
+      `🎓 *A/L exam target MCQs* _(මුලු විෂය නිර්දේශයම ආවරණය වන පරිදි බහුවරණ)_  \n` +
+      `🗓️ *Term test target MCQs* _(යම් වාරයකට අදාල බහුවරණ)_`,
     [
       [{ text: 'Lesson target MCQs', callback_data: 'practice_type_lesson' }],
       [{ text: 'A/L exam target MCQs', callback_data: 'practice_type_exam' }],
@@ -333,8 +337,12 @@ async function sendLessonChooser(chatId, session) {
   }
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await sendMenuAndStore(session, chatId, '📍 Select a lesson (ඔබට අවශ්‍ය පාඩම තෝරාගන්න):', rows);
-}
+  await sendMenuAndStore(
+    session,
+    chatId,
+    '📍 *Select a lesson* _(ඔබට අවශ්‍ය පාඩම තෝරාගන්න)_:',
+    rows
+  );
 
 async function sendTermChooser(chatId, session) {
   const subjectId = session.data.subjectId;
@@ -364,8 +372,12 @@ async function sendTermChooser(chatId, session) {
   });
   rows.push([{ text: '⬅️ Back', callback_data: 'menu_practice' }]);
 
-  await sendMenuAndStore(session, chatId, '📍 Select a term (ඔබට අවශ්‍ය වාරය තෝරාගන්න):', rows);
-}
+  await sendMenuAndStore(
+    session,
+    chatId,
+    '📍 *Select a term* _(ඔබට අවශ්‍ය වාරය තෝරාගන්න)_:',
+    rows
+  );
 
 async function sendQuestionCountChooser(chatId, session) {
   session.state = 'CHOOSING_QCOUNT';
@@ -373,7 +385,7 @@ async function sendQuestionCountChooser(chatId, session) {
   await sendMenuAndStore(
     session,
     chatId,
-    '❓ How many questions? (ඔබට බහුවරණ කීයක් අවශ්‍යද?)',
+    '*❓ How many questions?* _(ඔබට බහුවරණ කීයක් අවශ්‍යද?)_',
     [
       [
         { text: '10', callback_data: 'practice_qcount_10' },
@@ -660,9 +672,10 @@ async function handleWeeklyMenu(chatId, userId) {
   await sendMenuAndStore(
     session,
     chatId,
-    '🏆 Weekly Paper Choose your stream (ඔබගේ විශය ධාරාව තෝරන්න) 👇:  \n' +
-      '🩺 Bio stream (විද්‍යා)  \n' +
-      '📐 Maths stream (ගණිත)',
+    '*🏆 Weekly Paper*\n' +
+      '*Choose your stream* _(ඔබගේ විශය ධාරාව තෝරන්න)_ 👇:  \n' +
+      '🩺 *Bio stream* _(විද්‍යා)_  \n' +
+      '📐 *Maths stream* _(ගණිත)_',
     [
       [
         { text: 'Bio Stream', callback_data: 'weekly_stream_bio' },
@@ -683,9 +696,9 @@ async function handleWeeklyStream(chatId, userId, stream) {
   await sendMenuAndStore(
     session,
     chatId,
-    `🏆 Weekly Paper – ${streamLabel}\n\n` +
-      `Attend the paper now or see the Top 10 in the Web App. ✍️🥇 \n` +
-      `(ප්‍රශ්ණ පත්‍රයට සහභාගී වන්න, නැති නම් වැඩිම ලකුණු ලබාගත් මුල් 10දෙනා බලන්න.)`,
+    `*🏆 Weekly Paper – ${streamLabel}*\n\n` +
+      `*Attend the paper now* or *see the Top 10* in the Web App. ✍️🥇 \n` +
+      `_(ප්‍රශ්ණ පත්‍රයට සහභාගී වන්න, නැති නම් වැඩිම ලකුණු ලබාගත් මුල් 10දෙනා බලන්න.)`,
     [
       [
         {
@@ -795,10 +808,10 @@ async function handleAbout(chatId, userId) {
     session,
     chatId,
     'ℹ️ *About Us*\n\n' +
-      'This bot helps A/L students practice MCQs in Physics, Chemistry, Bio and Maths.\n' +
-      '• Lesson, term and exam‑target practice\n' +
-      '• Weekly mixed papers with rankings\n' +
-      '• Web App is used only for registration and Top 10 leaderboard.',
+      '*This bot helps A/L students practice MCQs* in Physics, Chemistry, Bio and Maths.\n' +
+      '• *Lesson, term and exam‑target practice*\n' +
+      '• *Weekly mixed papers* with rankings\n' +
+      '• Web App is used only for *registration* and *Top 10 leaderboard*.',
     [[{ text: '⬅️ Main Menu', callback_data: 'goto_main_menu' }]]
   );
 }
